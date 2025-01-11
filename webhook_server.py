@@ -70,8 +70,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         for payload in json_objects:
             results.extend(self.extract_filtered_data(payload, WebhookHandler.filters))
 
-        # Simplify the output
-        result = results if len(results) > 1 else results[0]
+        # Handle empty results
+        if not results:
+            result = None  # Return None or an empty structure if no matches
+        else:
+            # Simplify the output for single results
+            result = results if len(results) > 1 else results[0]
 
         # Display the result
         if WebhookHandler.plain:
