@@ -16,37 +16,81 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if not WebhookHandler.silent:
             super().log_message(format, *args)
 
+    def parse_multiple_json_objects(self, data):
+        """
+        Parse multiple JSON objects from a string.
+        """
+        objects = []
+        decoder = json.JSONDecoder()
+        pos = 0
+        while pos < len(data):
+            try:
+                obj, pos = decoder.raw_decode(data, pos)
+                objects.append(obj)
+            except json.JSONDecodeError:
+                break
+            while pos < len(data) and data[pos].isspace():
+                pos += 1
+        return objects
+
+    def extract_filtered_data(self, payload, filters):
+        """
+        Extract filtered data based on the filters provided.
+        Handles nested structures like lists and dictionaries.
+        """
+        for path in filters:
+            keys = path.split(".")
+            value = payload
+            try:
+                for key in keys:
+                    if isinstance(value, list):
+                        # Handle lists: Extract key from each item
+                        value = [item.get(key, None) for item in value if isinstance(item, dict)]
+                    elif isinstance(value, dict):
+                        value = value.get(key, None)
+                    else:
+                        value = None  # Stop if a non-dict/list value is encountered
+                if value is not None:  # Only return the first valid filter
+                    return value
+            except Exception:
+                pass
+        return None
+
+    def simplify_output(self, result):
+        """
+        Simplify the output to remove unnecessary brackets for single items.
+        """
+        if isinstance(result, list) and len(result) == 1:
+            return result[0]
+        return result
+
     def do_POST(self):
         # Read the payload
         content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        try:
-            payload = json.loads(post_data)
-        except json.JSONDecodeError:
-            payload = {"error": "Invalid JSON payload"}
+        post_data = self.rfile.read(content_length).decode('utf-8')
 
-        # Apply filtering if specified
-        if WebhookHandler.filters:
-            filtered_payload = {}
-            for path in WebhookHandler.filters:
-                keys = path.split(".")
-                value = payload
-                try:
-                    for key in keys:
-                        if isinstance(value, list):
-                            value = [item.get(key, None) for item in value]
-                        else:
-                            value = value.get(key, None)
-                    filtered_payload[path] = value
-                except Exception as e:
-                    filtered_payload[path] = f"Error: {e}"
-            payload = filtered_payload
+        # Parse multiple JSON objects from the payload
+        json_objects = self.parse_multiple_json_objects(post_data)
 
-        # Display the payload
-        if WebhookHandler.plain:
-            print(json.dumps(payload))
+        # Process and filter each JSON object
+        results = []
+        for payload in json_objects:
+            if "alerts" in payload:  # Only process objects with "alerts"
+                filtered_data = self.extract_filtered_data(payload, WebhookHandler.filters)
+                if filtered_data is not None:
+                    results.append(filtered_data)
+
+        # Simplify the output for single results
+        if len(results) == 1:
+            result = self.simplify_output(results[0])
         else:
-            print(json.dumps(payload, indent=4))
+            result = results
+
+        # Display the result
+        if WebhookHandler.plain:
+            print(json.dumps(result))
+        else:
+            print(json.dumps(result, indent=4))
 
         # Respond with 200 OK
         self.send_response(200)
