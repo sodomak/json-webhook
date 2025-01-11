@@ -36,8 +36,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def extract_filtered_data(self, payload, filters):
         """
         Extract filtered data based on the filters provided.
-        Handles nested structures like lists and dictionaries.
+        Handles both flat and nested structures.
         """
+        values = []
         for path in filters:
             keys = path.split(".")
             value = payload
@@ -50,19 +51,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         value = value.get(key, None)
                     else:
                         value = None  # Stop if a non-dict/list value is encountered
-                if value is not None:  # Only return the first valid filter
-                    return value
+                if value is not None:  # Add non-null values to the result
+                    values.append(value)
             except Exception:
                 pass
-        return None
-
-    def simplify_output(self, result):
-        """
-        Simplify the output to remove unnecessary brackets for single items.
-        """
-        if isinstance(result, list) and len(result) == 1:
-            return result[0]
-        return result
+        return values
 
     def do_POST(self):
         # Read the payload
@@ -75,16 +68,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Process and filter each JSON object
         results = []
         for payload in json_objects:
-            if "alerts" in payload:  # Only process objects with "alerts"
-                filtered_data = self.extract_filtered_data(payload, WebhookHandler.filters)
-                if filtered_data is not None:
-                    results.append(filtered_data)
+            results.extend(self.extract_filtered_data(payload, WebhookHandler.filters))
 
-        # Simplify the output for single results
-        if len(results) == 1:
-            result = self.simplify_output(results[0])
-        else:
-            result = results
+        # Simplify the output
+        result = results if len(results) > 1 else results[0]
 
         # Display the result
         if WebhookHandler.plain:
